@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数织解题器 · Nonogram Solver</title>
+<style>
+:root {
+  --cell: 40px;
+  --border: #e2e8f0;
+  --accent: #4f46e5;
+  --ink: #1e293b;
+  --muted: #64748b;
+  --bg: #f6f7fb;
+  --fill-color: #1f2937;
+  --x-color: #94a3b8;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  overflow: hidden;
+}
+.app { display: flex; height: 100vh; }
+
+/* 侧边栏 */
+.sidebar {
+  width: 200px; flex: none; background: #fff; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 18px 12px;
+}
+.brand { font-size: 17px; font-weight: 800; padding: 4px 10px 18px; white-space: nowrap; }
+.nav {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  border: none; background: transparent; padding: 11px 12px; border-radius: 10px;
+  font-size: 14px; color: #475569; cursor: pointer; margin-bottom: 4px; transition: .12s;
+}
+.nav:hover { background: #f1f5f9; }
+.nav.active { background: var(--accent); color: #fff; font-weight: 600; }
+.sidebar-foot { margin-top: auto; padding: 10px; font-size: 11px; color: #94a3b8; }
+
+/* 主区 */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.topbar {
+  height: 56px; flex: none; background: #fff; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 24px;
+}
+.topbar h1 { font-size: 17px; margin: 0; }
+.timer { font-size: 15px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.content { flex: 1; overflow: auto; padding: 24px; }
+.panel { display: none; max-width: 980px; margin: 0 auto; }
+.panel.active { display: block; }
+.panel-desc { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.7; }
+
+/* 通用 */
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.controls label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #334155; }
+.controls input[type=number] {
+  width: 62px; padding: 7px 8px; border: 1px solid var(--border);
+  border-radius: 9px; font-size: 14px; text-align: center; background: #fff;
+}
+.controls select {
+  padding: 7px 8px; border: 1px solid var(--border); border-radius: 9px;
+  font-size: 13px; background: #fff; max-width: 220px;
+}
+button {
+  border: none; border-radius: 10px; padding: 9px 16px; font-size: 14px; cursor: pointer;
+  background: #e2e8f0; color: #1e293b; transition: .13s;
+}
+button:hover { filter: brightness(.96); }
+button:active { transform: translateY(1px); }
+button:disabled { opacity: .4; cursor: not-allowed; filter: none; }
+button.primary { background: var(--accent); color: #fff; font-weight: 600; }
+button.primary:hover { background: #4338ca; }
+.hint { color: var(--muted); font-size: 13px; margin: 12px 0 0; line-height: 1.8; }
+.status { margin: 14px 0 0; min-height: 22px; font-size: 14px; text-align: center; }
+.status.ok { color: #15803d; }
+.status.err { color: #b91c1c; }
+.status.info { color: #475569; }
+
+/* 难度网格 */
+.diff-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.diff-row { display: flex; align-items: center; gap: 8px; }
+.diff-size { width: 58px; font-size: 13px; font-weight: 700; color: #475569; }
+.diff {
+  flex: 1; max-width: 110px; padding: 9px 0; background: #fff; border: 1px solid var(--border);
+  border-radius: 10px; color: #475569; font-size: 13px;
+}
+.diff.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.gen-actions { display: flex; gap: 10px; }
+
+/* 棋盘 */
+.sheetbox { overflow: auto; padding: 8px 4px; }
+.sheet {
+  display: grid; gap: 1px; background: #94a3b8; border: 2px solid #64748b;
+  border-radius: 6px; width: max-content; margin: 0 auto;
+}
+.corner {
+  background: #e2e8f0; width: var(--cell); height: var(--cell);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--muted); user-select: none;
+}
+.clue {
+  background: #f1f5f9; border: none; width: var(--cell); height: var(--cell);
+  text-align: center; font-size: 12px; padding: 2px; color: #334155; outline: none;
+  display: flex; align-items: center; justify-content: center;
+}
+input.clue { display: block; }
+.clue:focus { background: #e0e7ff; }
+.clue.bad { background: #fee2e2; }
+.cell {
+  width: var(--cell); height: var(--cell); background: #fff; cursor: pointer; position: relative;
+  background-image: linear-gradient(45deg, #f8fafc 25%, transparent 25%, transparent 75%, #f8fafc 75%),
+                    linear-gradient(45deg, #f8fafc 25%, transparent 25%, transparent 75%, #f8fafc 75%);
+  background-size: 12px 12px; background-position: 0 0, 6px 6px;
+  transition: background-color .08s;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.cell:hover { outline: 2px solid #6366f1; outline-offset: -2px; }
+.cell.filled { background: var(--fill-color); background-image: none; }
+.cell.empty { background: #fff; background-image: none; }
+.cell.empty::before { content: '×'; color: var(--x-color); font-size: 21px; font-weight: 700; line-height: 1; }
+.cell.hl { outline: 3px solid #f59e0b !important; outline-offset: -3px; z-index: 1; }
+.legend { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.legend i { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin: 0 4px 0 12px; border: 1px solid #94a3b8; font-style: normal; text-align: center; line-height: 12px; font-size: 10px; }
+.legend .k1 { background: var(--fill-color); }
+.legend .k2 { background: #fff; color: var(--x-color); }
+.legend .k3 { background: #f8fafc; }
+.result-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; margin-top: 14px; }
+.sollabel { font-size: 14px; color: var(--accent); font-weight: 600; }
+
+/* 设置 */
+.settings-group { display: flex; flex-direction: column; gap: 14px; max-width: 420px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: #334155; }
+.setting-row input[type=color] { width: 52px; height: 30px; border: 1px solid var(--border); border-radius: 6px; padding: 2px; background: #fff; cursor: pointer; }
+.setting-row label.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* 解析 */
+.explain-text { margin-top: 12px; font-size: 14px; line-height: 1.8; color: #334155; min-height: 20px; }
+.ex-head { font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+.ex-body { color: #475569; }
+.ex-note { margin-top: 8px; color: #b45309; }
+
+/* 答对弹窗 */
+.modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+.modal { background: #fff; border-radius: 20px; padding: 28px 32px; width: 100%; max-width: 430px; text-align: center; box-shadow: 0 20px 60px rgba(15,23,42,.3); }
+.modal-title { font-size: 24px; font-weight: 800; margin-bottom: 4px; }
+.modal-sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+.modal-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 22px; }
+.modal-stats .stat { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 12px 8px; }
+.modal-stats .stat span { display: block; font-size: 20px; font-weight: 800; color: var(--ink); }
+.modal-stats .stat label { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.modal-actions { display: flex; gap: 10px; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">🧩 数织解题器</div>
+    <button class="nav active" data-panel="gen">🎲 出题</button>
+    <button class="nav" data-panel="solve">🧩 解题</button>
+    <button class="nav" data-panel="samples">📁 我的实例</button>
+    <button class="nav" data-panel="explain">📖 解析</button>
+    <button class="nav" data-panel="settings">⚙️ 设置</button>
+    <div class="sidebar-foot">数据不出本机</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="panelTitle">出题</h1>
+      <span id="timerLabel" class="timer">⏱ 00:00</span>
+    </header>
+    <div class="content">
+
+      <section class="panel active" id="panel-gen">
+        <p class="panel-desc">选择难度，自动生成一道保证<b>唯一解</b>、且每一步都能<b>纯逻辑推出（无需猜测）</b>的数织题。</p>
+        <div class="diff-grid">
+          <div class="diff-row">
+            <span class="diff-size">5×5</span>
+            <button class="diff" data-key="5-easy">简单</button>
+            <button class="diff" data-key="5-medium">中等</button>
+            <button class="diff" data-key="5-hard">困难</button>
+          </div>
+          <div class="diff-row">
+            <span class="diff-size">10×10</span>
+            <button class="diff" data-key="10-easy">简单</button>
+            <button class="diff active" data-key="10-medium">中等</button>
+            <button class="diff" data-key="10-hard">困难</button>
+          </div>
+          <div class="diff-row">
+            <span class="diff-size">15×15</span>
+            <button class="diff" data-key="15-easy">简单</button>
+            <button class="diff" data-key="15-medium">中等</button>
+            <button class="diff" data-key="15-hard">困难</button>
+          </div>
+        </div>
+        <div class="gen-actions">
+          <button id="genBtn" class="primary">🎲 生成题目</button>
+          <button id="genAnswerBtn">👁 显示答案</button>
+        </div>
+        <div class="status" id="genStatus"></div>
+      </section>
+
+      <section class="panel" id="panel-solve">
+        <div class="controls">
+          <label>行数 <input id="rowsInput" type="number" min="1" max="25" value="10"></label>
+          <label>列数 <input id="colsInput" type="number" min="1" max="25" value="10"></label>
+          <button id="buildBtn">生成输入表</button>
+        </div>
+        <p class="hint">📌 在每行、每列前的小格子里输入线索数字（如 <b>1 1 1</b>，空格或逗号分隔；整行/列没有黑格就留空），点「求解」。<br>
+        🖱 <b>左键</b>点击/拖动 = 填黑 ↔ 取消；<b>右键</b>点击/拖动 = 标 × ↔ 取消。拖动只改变与按下那一格状态相同的格子。</p>
+        <div class="sheetbox" id="sheetBox"></div>
+        <div class="legend">图例：<i class="k1"></i>填黑　<i class="k2">×</i>空格　<i class="k3"></i>未知</div>
+        <div class="result-bar">
+          <button id="solveBtn" class="primary">▶ 求解</button>
+          <button id="undoBtn" title="撤销（Ctrl+Z）">↶ 撤销</button>
+          <button id="redoBtn" title="重做（Ctrl+Y）">↷ 重做</button>
+          <button id="clearHintsBtn">清空棋盘</button>
+          <button id="prevSolBtn" style="display:none">◀ 上一个解</button>
+          <span id="solLabel" class="sollabel" style="display:none"></span>
+          <button id="nextSolBtn" style="display:none">下一个解 ▶</button>
+        </div>
+        <div class="status" id="status"></div>
+      </section>
+
+      <section class="panel" id="panel-samples">
+        <div class="controls">
+          <select id="sampleSelect"></select>
+          <button id="loadSampleBtn">载入</button>
+          <button id="saveSampleBtn" title="把当前棋盘上的图形保存为实例">💾 保存当前图形</button>
+          <button id="renameSampleBtn">改名</button>
+          <button id="deleteSampleBtn">删除</button>
+          <button id="exportSamplesBtn" title="导出为 JSON 文件备份">导出</button>
+          <button id="importSamplesBtn" title="从 JSON 文件导入">导入</button>
+          <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
+        </div>
+        <p class="hint">实例保存在程序的数据目录（<b>不在 exe 内部</b>）。「导出」备份成文件，「导入」可在网页版与桌面版之间迁移。</p>
+      </section>
+
+      <section class="panel" id="panel-explain">
+        <div class="controls">
+          <button id="explainBtn" class="primary">开始解析</button>
+          <button id="explainPrevBtn">◀ 上一步</button>
+          <button id="explainNextBtn">下一步 ▶</button>
+          <button id="explainAutoBtn">▶ 自动播放</button>
+          <button id="explainEndBtn">跳到最后</button>
+          <button id="explainResetBtn">重置</button>
+          <span id="explainCounter" class="sollabel"></span>
+        </div>
+        <p class="hint">每次点「开始解析」都从<b>空白棋盘</b>从头开始，逐步演示"数字 → 哪些格子必然填黑或标 ×"。橙色高亮为当前步骤推出的格子。</p>
+        <div class="sheetbox" id="explainBox"></div>
+        <div id="explainText" class="explain-text"></div>
+      </section>
+
+      <section class="panel" id="panel-settings">
+        <div class="settings-group">
+          <div class="setting-row"><span>填黑格颜色</span> <input type="color" id="fillColorInput" value="#1f2937"></div>
+          <div class="setting-row"><span>空格（×）颜色</span> <input type="color" id="xColorInput" value="#94a3b8"></div>
+          <div class="setting-row"><label class="switch"><input type="checkbox" id="autoXToggle" checked> 自动标 ×（仅当某行/列完全确定时）</label></div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<div id="winModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-title">🎉 答对了！</div>
+    <div class="modal-sub">你成功解出了这道数织题</div>
+    <div class="modal-stats">
+      <div class="stat"><span id="winTime">00:00</span><label>耗时</label></div>
+      <div class="stat"><span id="winSize">10×10</span><label>题目</label></div>
+      <div class="stat"><span id="winDiff">普通</span><label>难度</label></div>
+      <div class="stat"><span id="winMarks">0</span><label>标记步数</label></div>
+    </div>
+    <div class="modal-actions">
+      <button id="winAgainBtn" class="primary">🎲 再来一题</button>
+      <button id="winCloseBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ==================== 求解器 ====================
+function genPlacements(n, clues) {
+  if (clues.length === 0) return [new Array(n).fill(-1)];
+  const m = clues.reduce((a, b) => a + b, 0);
+  if (m + clues.length - 1 > n) return [];
+  const results = [];
+  const cur = new Array(n).fill(-1);
+  const suffix = new Array(clues.length + 1).fill(0);
+  for (let i = clues.length - 1; i >= 0; i--) suffix[i] = suffix[i + 1] + clues[i];
+  (function rec(blockIdx, pos) {
+    if (blockIdx === clues.length) { results.push(cur.slice()); return; }
+    const len = clues[blockIdx];
+    const needAfter = suffix[blockIdx + 1] + (clues.length - blockIdx - 1);
+    const maxStart = n - len - needAfter;
+    for (let s = pos; s <= maxStart; s++) {
+      cur.fill(1, s, s + len);
+      rec(blockIdx + 1, s + len + 1);
+      cur.fill(-1, s, s + len);
+    }
+  })(0, 0);
+  return results;
+}
+
+function verifyKnownLine(line, clues) {
+  const blocks = [];
+  let c = 0;
+  for (let i = 0; i <= line.length; i++) {
+    if (i < line.length && line[i] === 1) c++;
+    else { if (c > 0) blocks.push(c); c = 0; }
+  }
+  if (blocks.length !== clues.length) return false;
+  for (let i = 0; i < blocks.length; i++) if (blocks[i] !== clues[i]) return false;
+  return true;
+}
+
+function createLineSolver(cache, budget) {
+  return function applyLine(line, clues) {
+    if (budget) {
+      budget.ops++;
+      if (budget.ops % 2048 === 0 && Date.now() - budget.start > budget.maxMs) budget.aborted = true;
+      if (budget.ops > budget.maxOps) budget.aborted = true;
+      if (budget.aborted) return { line: line.slice(), changed: false, valid: [line.slice()], count: 1 };
+    }
+    if (!line.includes(0)) {
+      const ok = verifyKnownLine(line, clues);
+      return ok ? { line: line.slice(), changed: false, valid: [line.slice()], count: 1 } : null;
+    }
+    const key = line.length + ':' + clues.join(',');
+    let placements = cache.get(key);
+    if (!placements) { placements = genPlacements(line.length, clues); cache.set(key, placements); }
+    const valid = [];
+    for (let p = 0; p < placements.length; p++) {
+      const cand = placements[p];
+      let ok = true;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c !== 0 && c !== cand[i]) { ok = false; break; }
+      }
+      if (ok) valid.push(cand);
+    }
+    if (valid.length === 0) return null;
+    if (budget && budget.aborted) return { line: line.slice(), changed: false, valid, count: valid.length };
+    const out = line.slice();
+    let changed = false;
+    for (let i = 0; i < line.length; i++) {
+      if (out[i] !== 0) continue;
+      const v0 = valid[0][i];
+      let same = true;
+      for (let j = 1; j < valid.length; j++) { if (valid[j][i] !== v0) { same = false; break; } }
+      if (same) { out[i] = v0; changed = true; }
+    }
+    return { line: out, changed, valid, count: valid.length };
+  };
+}
+
+function propagateGrid(grid, rowClues, colClues, lm) {
+  const R = rowClues.length, C = colClues.length;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < R; i++) {
+      const res = lm(grid[i], rowClues[i]);
+      if (res === null) return null;
+      if (res.changed) { grid[i] = res.line; changed = true; }
+    }
+    for (let j = 0; j < C; j++) {
+      const col = new Array(R);
+      for (let i = 0; i < R; i++) col[i] = grid[i][j];
+      const res = lm(col, colClues[j]);
+      if (res === null) return null;
+      if (res.changed) { const nl = res.line; for (let i = 0; i < R; i++) grid[i][j] = nl[i]; changed = true; }
+    }
+  }
+  return grid;
+}
+
+function solveNonogram(rowClues, colClues, opts) {
+  opts = opts || {};
+  const maxSolutions = opts.maxSolutions || 8;
+  const maxOps = opts.maxOps || 30000000;
+  const maxMs = opts.maxMs || 15000;
+  const R = rowClues.length, C = colClues.length;
+  const budget = { ops: 0, maxOps, maxMs, start: Date.now(), aborted: false };
+  const cache = new Map();
+  const lm = createLineSolver(cache, budget);
+  let capped = false;
+  const solutions = [];
+  function dfs(grid) {
+    if (budget.aborted) return;
+    if (solutions.length >= maxSolutions) { capped = true; return; }
+    if (propagateGrid(grid, rowClues, colClues, lm) === null) return;
+    if (budget.aborted) return;
+    let unknown = 0;
+    for (let i = 0; i < R && unknown === 0; i++) if (grid[i].includes(0)) unknown++;
+    if (unknown === 0) { solutions.push(grid.map(r => r.slice())); if (solutions.length >= maxSolutions) capped = true; return; }
+    let bestIdx = -1, bestIsRow = true, bestValid = null;
+    for (let i = 0; i < R; i++) {
+      if (!grid[i].includes(0)) continue;
+      const res = lm(grid[i], rowClues[i]);
+      if (res === null) return;
+      if (res.count >= 2 && (!bestValid || res.count < bestValid.length)) { bestValid = res.valid; bestIdx = i; bestIsRow = true; }
+    }
+    for (let j = 0; j < C; j++) {
+      const col = new Array(R);
+      for (let i = 0; i < R; i++) col[i] = grid[i][j];
+      if (!col.includes(0)) continue;
+      const res = lm(col, colClues[j]);
+      if (res === null) return;
+      if (res.count >= 2 && (!bestValid || res.count < bestValid.length)) { bestValid = res.valid; bestIdx = j; bestIsRow = false; }
+    }
+    if (!bestValid) return;
+    for (let p = 0; p < bestValid.length; p++) {
+      if (budget.aborted || capped || solutions.length >= maxSolutions) return;
+      const ng = grid.map(r => r.slice());
+      if (bestIsRow) ng[bestIdx] = bestValid[p].slice();
+      else { const nl = bestValid[p]; for (let i = 0; i < R; i++) ng[i][bestIdx] = nl[i]; }
+      dfs(ng);
+    }
+  }
+  let init;
+  if (opts.hints && opts.hints.length === R && opts.hints.every(r => r.length === C)) init = opts.hints.map(r => r.slice());
+  else { init = []; for (let i = 0; i < R; i++) init.push(new Array(C).fill(0)); }
+  dfs(init);
+  return { solutions, ops: budget.ops, aborted: budget.aborted, ms: Date.now() - budget.start, complete: !budget.aborted && !capped };
+}
+
+// ==================== 解析 ====================
+function explainLine(line, clues, cache) {
+  const key = line.length + ':' + clues.join(',');
+  let placements = cache.get(key);
+  if (!placements) { placements = genPlacements(line.length, clues); cache.set(key, placements); }
+  const valid = [];
+  for (let p = 0; p < placements.length; p++) {
+    const cand = placements[p];
+    let ok = true;
+    for (let i = 0; i < line.length; i++) { if (line[i] !== 0 && line[i] !== cand[i]) { ok = false; break; } }
+    if (ok) valid.push(cand);
+  }
+  if (valid.length === 0) return null;
+  const forced = [];
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] !== 0) continue;
+    const v = valid[0][i];
+    let same = true;
+    for (let j = 1; j < valid.length; j++) { if (valid[j][i] !== v) { same = false; break; } }
+    if (same) forced.push({ pos: i, value: v });
+  }
+  return { forced, count: valid.length };
+}
+function buildStepText(clues, res) {
+  const clueStr = clues.length ? clues.join(' ') : '（无）';
+  if (res.count === 1) return `线索「${clueStr}」只剩唯一一种摆法，剩余 ${res.forced.length} 格全部确定。`;
+  const filled = [], empty = [];
+  for (const f of res.forced) (f.value === 1 ? filled : empty).push(f.pos + 1);
+  const parts = [];
+  if (filled.length) parts.push(`第 ${filled.join('、')} 格在所有摆法里都是黑，故填黑`);
+  if (empty.length) parts.push(`第 ${empty.join('、')} 格在所有摆法里都是空，故标 ×`);
+  return `线索「${clueStr}」共有 ${res.count} 种合法摆法：${parts.join('；')}。`;
+}
+function buildExplanation(rowClues, colClues, hints) {
+  const R = rowClues.length, C = colClues.length;
+  const cache = new Map();
+  const grid = hints.map(r => r.slice());
+  const steps = [];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < R; i++) {
+      const res = explainLine(grid[i], rowClues[i], cache);
+      if (res === null) return { steps, solved: false, error: '标记与线索矛盾' };
+      if (res.forced.length) {
+        const cells = res.forced.map(f => ({ i, j: f.pos, value: f.value }));
+        for (const f of res.forced) grid[i][f.pos] = f.value;
+        steps.push({ kind: 'row', index: i, label: `第 ${i + 1} 行`, clues: rowClues[i], cells, text: buildStepText(rowClues[i], res) });
+        changed = true;
+      }
+    }
+    for (let j = 0; j < C; j++) {
+      const col = new Array(R);
+      for (let i = 0; i < R; i++) col[i] = grid[i][j];
+      const res = explainLine(col, colClues[j], cache);
+      if (res === null) return { steps, solved: false, error: '标记与线索矛盾' };
+      if (res.forced.length) {
+        const cells = res.forced.map(f => ({ i: f.pos, j, value: f.value }));
+        for (const f of res.forced) grid[f.pos][j] = f.value;
+        steps.push({ kind: 'col', index: j, label: `第 ${j + 1} 列`, clues: colClues[j], cells, text: buildStepText(colClues[j], res) });
+        changed = true;
+      }
+    }
+  }
+  const solved = grid.every(row => !row.includes(0));
+  return { steps, solved, error: null };
+}
+
+// ==================== 状态 ====================
+const $ = id => document.getElementById(id);
+let R = 0, C = 0;
+let hintGrid = [];
+let solutions = [], solIndex = 0;
+let dragState = null;
+let history = [], future = [];
+let explainSteps = [], explainIndex = -1;
+let explainHints = null, explainRowClues = [], explainColClues = [];
+let explainSolved = false, explainTimer = null;
+let samples = [];
+let currentDifficultyKey = '10-medium';
+let lastGenerated = null;
+let timerStart = null, timerInterval = null, solvedFlag = false, markCount = 0;
+let autoXEnabled = true, autoXScheduled = false;
+const autoXCache = new Map();
+let puzzleAnswer = null;
+let lastAutoXY = null;
+
+const BUILTIN_SAMPLES = [
+  { name: '爱心 10×10', rowClues: [[2,2],[4,4],[10],[10],[8],[6],[4],[2],[],[]], colClues: [[3],[5],[6],[6],[6],[6],[6],[6],[5],[3]] },
+  { name: '笑脸 5×5', rowClues: [[1,1],[1,1],[1,1],[3],[]], colClues: [[2],[1,1],[1],[1,1],[2]] },
+  { name: '爱心 15×15', rowClues: [[2,2],[4,4],[6,6],[15],[15],[15],[13],[11],[9],[7],[5],[3],[1],[],[]], colClues: [[4],[6],[8],[9],[9],[9],[9],[10],[9],[9],[9],[9],[8],[6],[4]] },
+];
+
+const LEVELS = [
+  { key: '5-easy',    size: 5,  levelLabel: '简单', density: 0.6,  minSteps: 2 },
+  { key: '5-medium',  size: 5,  levelLabel: '中等', density: 0.5,  minSteps: 4 },
+  { key: '5-hard',    size: 5,  levelLabel: '困难', density: 0.4,  minSteps: 6 },
+  { key: '10-easy',   size: 10, levelLabel: '简单', density: 0.58, minSteps: 5 },
+  { key: '10-medium', size: 10, levelLabel: '中等', density: 0.48, minSteps: 10 },
+  { key: '10-hard',   size: 10, levelLabel: '困难', density: 0.4,  minSteps: 16 },
+  { key: '15-easy',   size: 15, levelLabel: '简单', density: 0.58, minSteps: 8 },
+  { key: '15-medium', size: 15, levelLabel: '中等', density: 0.5,  minSteps: 16 },
+  { key: '15-hard',   size: 15, levelLabel: '困难', density: 0.45, minSteps: 28 },
+];
+function levelByKey(k) { return LEVELS.find(l => l.key === k) || LEVELS[4]; }
+function levelLabel(l) { return `${l.size}×${l.size} ${l.levelLabel}`; }
+
+function clampInt(v, min, max) {
+  let n = Math.round(Number(v));
+  if (!Number.isFinite(n)) n = 10;
+  return Math.max(min, Math.min(max, n));
+}
+function setStatus(text, cls) {
+  const s = $('status'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : '');
+}
+function genStatus(text, cls) {
+  const s = $('genStatus'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : '');
+}
+function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function lsGet(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
+
+// ==================== 撤销 / 重做 ====================
+function snapshot() { return { grid: hintGrid.map(r => r.slice()) }; }
+function pushUndo() { history.push(snapshot()); if (history.length > 200) history.shift(); future.length = 0; updateUndoButtons(); }
+function restore(s) {
+  hintGrid = s.grid.map(r => r.slice());
+  document.querySelectorAll('#sheetBox .cell').forEach(c => paintCell(c, hintGrid[+c.dataset.i][+c.dataset.j]));
+}
+function undo() { if (!history.length) return; future.push(snapshot()); restore(history.pop()); setStatus('已撤销上一步', 'info'); updateUndoButtons(); }
+function redo() { if (!future.length) return; history.push(snapshot()); restore(future.pop()); setStatus('已重做', 'info'); updateUndoButtons(); }
+function updateUndoButtons() { $('undoBtn').disabled = history.length === 0; $('redoBtn').disabled = future.length === 0; }
+
+// ==================== 棋盘 ====================
+function getCellEl(i, j) { return document.querySelector(`#sheetBox .cell[data-i="${i}"][data-j="${j}"]`); }
+function paintCell(c, v) {
+  c.classList.remove('filled', 'empty');
+  if (v === 1) c.classList.add('filled');
+  else if (v === -1) c.classList.add('empty');
+}
+function setCellValue(i, j, v) {
+  hintGrid[i][j] = v;
+  const el = getCellEl(i, j);
+  if (el) paintCell(el, v);
+  checkCompletion();
+  scheduleAutoX(i, j);
+}
+function leftPaintValue(v) { return v === 0 ? 1 : v === 1 ? 0 : -1; }
+function rightPaintValue(v) { return v === 0 ? -1 : v === -1 ? 0 : 1; }
+
+function buildSheet() {
+  dragState = null;
+  markCount = 0;
+  solvedFlag = false;
+  puzzleAnswer = null;
+  lastAutoXY = null;
+  startTimer();
+  autoXCache.clear();
+  history = []; future = []; updateUndoButtons();
+  const box = $('sheetBox');
+  box.innerHTML = '';
+  R = clampInt($('rowsInput').value, 1, 25);
+  C = clampInt($('colsInput').value, 1, 25);
+  $('rowsInput').value = R; $('colsInput').value = C;
+  hintGrid = Array.from({ length: R }, () => new Array(C).fill(0));
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.style.gridTemplateColumns = `var(--cell) repeat(${C}, var(--cell))`;
+  sheet.addEventListener('contextmenu', e => e.preventDefault());
+  const corner = document.createElement('div');
+  corner.className = 'corner'; corner.textContent = '行＼列';
+  sheet.appendChild(corner);
+  for (let j = 0; j < C; j++) {
+    const inp = document.createElement('input');
+    inp.className = 'clue'; inp.type = 'text'; inp.dataset.kind = 'col'; inp.dataset.idx = j;
+    inp.title = '第 ' + (j + 1) + ' 列线索'; sheet.appendChild(inp);
+  }
+  for (let i = 0; i < R; i++) {
+    const inp = document.createElement('input');
+    inp.className = 'clue'; inp.type = 'text'; inp.dataset.kind = 'row'; inp.dataset.idx = i;
+    inp.title = '第 ' + (i + 1) + ' 行线索'; sheet.appendChild(inp);
+    for (let j = 0; j < C; j++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell'; cell.dataset.i = i; cell.dataset.j = j;
+      cell.title = `第 ${i + 1} 行 第 ${j + 1} 列（左键填黑/取消，右键标×/取消，按住可拖动）`;
+      sheet.appendChild(cell);
+    }
+  }
+  box.appendChild(sheet);
+  sheet.querySelectorAll('.clue').forEach(inp => {
+    inp.addEventListener('input', () => { inp.classList.remove('bad'); });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const all = Array.from(sheet.querySelectorAll('.clue'));
+        const next = all[(all.indexOf(inp) + 1) % all.length];
+        if (next) next.focus();
+      }
+    });
+  });
+  sheet.querySelectorAll('.cell').forEach(c => {
+    c.addEventListener('pointerdown', e => {
+      if (e.button !== 0 && e.button !== 2) return;
+      if (dragState) return;
+      e.preventDefault();
+      const i = +c.dataset.i, j = +c.dataset.j;
+      const s0 = hintGrid[i][j];
+      const target = e.button === 0 ? leftPaintValue(s0) : rightPaintValue(s0);
+      dragState = { pointerId: e.pointerId, source: s0, target };
+      if (target !== s0) { markCount++; pushUndo(); setCellValue(i, j, target); }
+      try { c.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    c.addEventListener('pointermove', e => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      if (dragState.target === dragState.source) return;
+      const t = document.elementFromPoint(e.clientX, e.clientY);
+      if (t && t.classList.contains('cell')) {
+        const i = +t.dataset.i, j = +t.dataset.j;
+        if (hintGrid[i][j] === dragState.source) setCellValue(i, j, dragState.target);
+      }
+    });
+    const endDrag = e => { if (dragState && e.pointerId === dragState.pointerId) dragState = null; };
+    c.addEventListener('pointerup', endDrag);
+    c.addEventListener('pointercancel', endDrag);
+    c.addEventListener('lostpointercapture', endDrag);
+  });
+  resetSolutions();
+  setStatus('');
+}
+
+function lockClues(lock) {
+  document.querySelectorAll('#sheetBox .clue').forEach(inp => { inp.readOnly = lock; });
+}
+
+// ==================== 计时 / 答对 ====================
+function formatTime(ms) { const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+function elapsedMs() { return timerStart ? Date.now() - timerStart : 0; }
+function updateTimerDisplay() { const el = $('timerLabel'); if (el) el.textContent = '⏱ ' + formatTime(elapsedMs()); }
+function startTimer() { stopTimer(); timerStart = Date.now(); timerInterval = setInterval(updateTimerDisplay, 500); updateTimerDisplay(); }
+function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
+function checkCompletion() {
+  if (solvedFlag) return;
+  if (puzzleAnswer) {
+    let wrong = 0, missing = 0;
+    for (let i = 0; i < R; i++) {
+      for (let j = 0; j < C; j++) {
+        const u = hintGrid[i][j], a = puzzleAnswer[i][j];
+        if (u === 1 && a === -1) wrong++;
+        else if (a === 1 && u !== 1) missing++;
+      }
+    }
+    if (wrong > 0) {
+      if (missing === 0) setStatus('⚠ 有黑格标错了，再检查一下', 'err');
+      return;
+    }
+    if (missing === 0) { solvedFlag = true; stopTimer(); showCompletionModal(); }
+    return;
+  }
+  const anyUnknown = hintGrid.some(row => row.includes(0));
+  if (anyUnknown) return;
+  const gathered = gatherClues();
+  if (gathered.error) return;
+  const res = solveNonogram(gathered.rowClues, gathered.colClues, { maxSolutions: 1, maxMs: 5000, hints: hintGrid });
+  if (res.solutions.length >= 1) { solvedFlag = true; stopTimer(); showCompletionModal(); }
+  else setStatus('⚠ 棋盘已填满，但和线索不符，再检查一下', 'err');
+}
+function showCompletionModal() {
+  $('winTime').textContent = formatTime(elapsedMs());
+  $('winSize').textContent = `${R}×${C}`;
+  const isGen = lastGenerated && lastGenerated.rows === R && lastGenerated.cols === C;
+  $('winDiff').textContent = isGen ? levelLabel(lastGenerated.level) : '自定义';
+  $('winMarks').textContent = markCount;
+  $('winModal').style.display = 'flex';
+}
+function closeWinModal() { $('winModal').style.display = 'none'; }
+
+// ==================== 自动标 × ====================
+function scheduleAutoX(i, j) {
+  if (!autoXEnabled) return;
+  lastAutoXY = { i, j };
+  if (autoXScheduled) return;
+  autoXScheduled = true;
+  requestAnimationFrame(() => { autoXScheduled = false; runAutoX(); });
+}
+function runAutoX() {
+  if (!lastAutoXY) return;
+  const { i, j } = lastAutoXY;
+  lastAutoXY = null;
+  const gathered = gatherClues();
+  if (gathered.error) return;
+  const rowRes = createLineSolver(autoXCache, null)(hintGrid[i].slice(), gathered.rowClues[i]);
+  if (rowRes && rowRes.count === 1) {
+    const p = rowRes.valid[0];
+    for (let k = 0; k < C; k++) {
+      if (hintGrid[i][k] === 0 && p[k] === -1) {
+        hintGrid[i][k] = -1;
+        const el = getCellEl(i, k); if (el) paintCell(el, -1);
+      }
+    }
+  }
+  const col = new Array(R);
+  for (let r = 0; r < R; r++) col[r] = hintGrid[r][j];
+  const colRes = createLineSolver(autoXCache, null)(col, gathered.colClues[j]);
+  if (colRes && colRes.count === 1) {
+    const p = colRes.valid[0];
+    for (let r = 0; r < R; r++) {
+      if (hintGrid[r][j] === 0 && p[r] === -1) {
+        hintGrid[r][j] = -1;
+        const el = getCellEl(r, j); if (el) paintCell(el, -1);
+      }
+    }
+  }
+}
+
+// ==================== 线索解析 ====================
+function parseClues(text) {
+  const t = text.trim();
+  if (t === '') return [];
+  const parts = t.split(/[\s,，;；、]+/);
+  const nums = [];
+  for (const p of parts) {
+    if (p === '') continue;
+    const n = Number(p);
+    if (!Number.isInteger(n) || n < 1) return null;
+    nums.push(n);
+  }
+  return nums;
+}
+function gatherClues() {
+  const sheet = document.querySelector('#sheetBox .sheet');
+  const rowClues = [], colClues = [];
+  const rowInputs = sheet.querySelectorAll('.clue[data-kind=row]');
+  const colInputs = sheet.querySelectorAll('.clue[data-kind=col]');
+  let bad = 0;
+  rowInputs.forEach(inp => { const c = parseClues(inp.value); inp.classList.remove('bad'); if (c === null) { inp.classList.add('bad'); bad++; rowClues.push(null); } else rowClues.push(c); });
+  colInputs.forEach(inp => { const c = parseClues(inp.value); inp.classList.remove('bad'); if (c === null) { inp.classList.add('bad'); bad++; colClues.push(null); } else colClues.push(c); });
+  if (bad) return { error: `有 ${bad} 处线索无法识别（请只输入正整数，用空格或逗号分隔）` };
+  for (let i = 0; i < R; i++) {
+    if (rowClues[i].some(n => n > C)) return { error: `第 ${i + 1} 行有数字超过列数 ${C}` };
+    const sum = rowClues[i].reduce((a, b) => a + b, 0) + rowClues[i].length - 1;
+    if (sum > C) return { error: `第 ${i + 1} 行线索放不下（数字之和 + 间隔超过 ${C}）` };
+  }
+  for (let j = 0; j < C; j++) {
+    if (colClues[j].some(n => n > R)) return { error: `第 ${j + 1} 列有数字超过行数 ${R}` };
+    const sum = colClues[j].reduce((a, b) => a + b, 0) + colClues[j].length - 1;
+    if (sum > R) return { error: `第 ${j + 1} 列线索放不下` };
+  }
+  return { rowClues, colClues };
+}
+
+function resetSolutions() {
+  solutions = []; solIndex = 0;
+  $('prevSolBtn').style.display = 'none';
+  $('nextSolBtn').style.display = 'none';
+  $('solLabel').style.display = 'none';
+}
+function showSolution(idx) {
+  const sol = solutions[idx];
+  pushUndo();
+  hintGrid = sol.map(r => r.slice());
+  document.querySelectorAll('#sheetBox .cell').forEach(c => paintCell(c, sol[+c.dataset.i][+c.dataset.j]));
+  solIndex = idx;
+  const many = solutions.length > 1;
+  $('solLabel').style.display = many ? '' : 'none';
+  if (many) $('solLabel').textContent = `第 ${idx + 1} / ${solutions.length} 个解`;
+}
+function updateSolButtons() {
+  const many = solutions.length > 1;
+  $('prevSolBtn').style.display = many ? '' : 'none';
+  $('nextSolBtn').style.display = many ? '' : 'none';
+  showSolution(solIndex);
+}
+function doSolve() {
+  stopTimer();
+  const gathered = gatherClues();
+  if (gathered.error) { setStatus('⚠ ' + gathered.error, 'err'); return; }
+  setStatus('求解中…', 'info');
+  resetSolutions();
+  const hints = hintGrid.map(r => r.slice());
+  setTimeout(() => {
+    const res = solveNonogram(gathered.rowClues, gathered.colClues, { maxSolutions: 8, hints });
+    if (res.aborted) { setStatus('⚠ 题目过于复杂，已超时中断', 'err'); return; }
+    if (res.solutions.length === 0) { setStatus('❌ 无解：请检查线索或棋盘标记', 'err'); return; }
+    solutions = res.solutions; solIndex = 0; updateSolButtons();
+    if (res.solutions.length === 1) puzzleAnswer = res.solutions[0];
+    solvedFlag = true;
+    const n = solutions.length;
+    setStatus(res.complete
+      ? (n === 1 ? `✅ 唯一解已显示（用时 ${res.ms} ms）` : `✅ 求解完成，共 ${n} 个解（${res.ms} ms），可翻看`)
+      : `✅ 已找到 ${n} 个解（可能还有更多），用时 ${res.ms} ms`, 'ok');
+  }, 30);
+}
+function clearHints() {
+  pushUndo();
+  hintGrid = Array.from({ length: R }, () => new Array(C).fill(0));
+  document.querySelectorAll('#sheetBox .cell').forEach(c => paintCell(c, 0));
+  resetSolutions();
+  solvedFlag = false;
+  setStatus('已清空棋盘标记', 'info');
+}
+
+// ==================== 出题（生成，保证纯逻辑可解） ====================
+function lineClues(arr) {
+  const r = []; let c = 0;
+  for (const v of arr) { if (v === 1) c++; else { if (c) r.push(c); c = 0; } }
+  if (c) r.push(c);
+  return r;
+}
+function generatePuzzle(lvl) {
+  const n = lvl.size;
+  let best = null;
+  for (let a = 0; a < 300; a++) {
+    const grid = [];
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      const row = [];
+      for (let j = 0; j < n; j++) { const v = Math.random() < lvl.density ? 1 : 0; row.push(v); total += v; }
+      grid.push(row);
+    }
+    if (total < n || total > n * n - n) continue;
+    const rowClues = grid.map(lineClues);
+    const colClues = [];
+    for (let j = 0; j < n; j++) colClues.push(lineClues(grid.map(r => r[j])));
+    const blank = Array.from({ length: n }, () => new Array(n).fill(0));
+    const ex = buildExplanation(rowClues, colClues, blank);
+    if (!ex.solved) continue; // 纯逻辑可解 → 必然唯一解、无猜测
+    const candidate = { grid, rowClues, colClues, size: n, level: lvl, steps: ex.steps.length };
+    if (ex.steps.length >= lvl.minSteps) return candidate;
+    if (!best || ex.steps.length > best.steps) best = candidate;
+  }
+  return best;
+}
+function doGenerate() {
+  const lvl = levelByKey(currentDifficultyKey);
+  genStatus('生成中…', 'info');
+  setTimeout(() => {
+    const res = generatePuzzle(lvl);
+    if (!res) { genStatus('⚠ 生成失败，请重试', 'err'); return; }
+    lastGenerated = res;
+    $('rowsInput').value = res.size;
+    $('colsInput').value = res.size;
+    buildSheet();
+    const sheet = document.querySelector('#sheetBox .sheet');
+    sheet.querySelectorAll('.clue[data-kind=row]').forEach((inp, i) => { inp.value = res.rowClues[i].join(' '); });
+    sheet.querySelectorAll('.clue[data-kind=col]').forEach((inp, j) => { inp.value = res.colClues[j].join(' '); });
+    puzzleAnswer = res.grid.map(row => row.map(v => v === 1 ? 1 : -1));
+    lockClues(true);
+    genStatus(`✅ 已生成「${levelLabel(lvl)}」（纯逻辑可解，约 ${res.steps} 步推理）`, 'ok');
+    switchPanel('solve');
+    setStatus(`已生成「${levelLabel(lvl)}」并填入棋盘，开始解题吧`, 'ok');
+  }, 30);
+}
+function showGeneratedAnswer() {
+  if (!lastGenerated || lastGenerated.size !== R) { setStatus('⚠ 请先点「生成题目」', 'err'); return; }
+  pushUndo();
+  const g = lastGenerated.grid;
+  hintGrid = g.map(row => row.map(v => v === 1 ? 1 : -1));
+  document.querySelectorAll('#sheetBox .cell').forEach(c => paintCell(c, hintGrid[+c.dataset.i][+c.dataset.j]));
+  resetSolutions();
+  switchPanel('solve');
+  setStatus('已显示该题答案（黑格为图案）', 'ok');
+}
+
+// ==================== 实例管理 ====================
+function loadSamples() {
+  const raw = lsGet('picross.samples');
+  if (raw === null) samples = BUILTIN_SAMPLES.map(s => ({ name: s.name, rowClues: s.rowClues, colClues: s.colClues }));
+  else {
+    try {
+      const parsed = JSON.parse(raw);
+      samples = Array.isArray(parsed) ? parsed.filter(s => s && Array.isArray(s.rowClues) && Array.isArray(s.colClues)) : [];
+    } catch (_) { samples = BUILTIN_SAMPLES.map(s => ({ name: s.name, rowClues: s.rowClues, colClues: s.colClues })); }
+  }
+  persistSamples();
+}
+function persistSamples() { lsSet('picross.samples', JSON.stringify(samples)); }
+function refreshSampleSelect() {
+  const sel = $('sampleSelect');
+  sel.innerHTML = '';
+  samples.forEach((s, i) => { const opt = document.createElement('option'); opt.value = i; opt.textContent = s.name; sel.appendChild(opt); });
+}
+function loadSelectedSample() {
+  const idx = +$('sampleSelect').value;
+  const s = samples[idx];
+  if (!s) return;
+  lastGenerated = null;
+  $('rowsInput').value = s.rowClues.length;
+  $('colsInput').value = s.colClues.length;
+  buildSheet();
+  const sheet = document.querySelector('#sheetBox .sheet');
+  sheet.querySelectorAll('.clue[data-kind=row]').forEach((inp, i) => { inp.value = s.rowClues[i].join(' '); });
+  sheet.querySelectorAll('.clue[data-kind=col]').forEach((inp, j) => { inp.value = s.colClues[j].join(' '); });
+  lockClues(true);
+  puzzleAnswer = null;
+  const g = gatherClues();
+  if (!g.error) {
+    const r = solveNonogram(g.rowClues, g.colClues, { maxSolutions: 1, maxMs: 5000 });
+    if (r.solutions.length === 1 && r.complete) puzzleAnswer = r.solutions[0];
+  }
+  switchPanel('solve');
+  setStatus(`已载入实例「${s.name}」`, 'info');
+}
+function saveCurrentAsSample() {
+  if (!hintGrid.length) { setStatus('⚠ 请先生成输入表', 'err'); return; }
+  const rowClues = hintGrid.map(lineClues);
+  const colClues = [];
+  for (let j = 0; j < C; j++) colClues.push(lineClues(hintGrid.map(r => r[j])));
+  const total = rowClues.reduce((a, c) => a + c.reduce((x, y) => x + y, 0), 0);
+  if (total === 0) { setStatus('⚠ 当前棋盘没有填黑格，无法保存', 'err'); return; }
+  const name = prompt('请输入实例名称：', `图案 ${R}×${C}`);
+  if (name === null) return;
+  const nm = name.trim() || (`图案 ${R}×${C}`);
+  samples.push({ name: nm, rowClues, colClues });
+  persistSamples(); refreshSampleSelect();
+  $('sampleSelect').value = samples.length - 1;
+  setStatus(`已保存实例「${nm}」`, 'ok');
+}
+function renameSample() {
+  const idx = +$('sampleSelect').value;
+  const s = samples[idx];
+  if (!s) return;
+  const name = prompt('请输入新的实例名称：', s.name);
+  if (name === null) return;
+  const nm = name.trim();
+  if (!nm) return;
+  s.name = nm; persistSamples(); refreshSampleSelect(); $('sampleSelect').value = idx;
+  setStatus(`实例已改名为「${nm}」`, 'ok');
+}
+function deleteSample() {
+  const idx = +$('sampleSelect').value;
+  const s = samples[idx];
+  if (!s) return;
+  if (!confirm(`确定删除实例「${s.name}」吗？`)) return;
+  samples.splice(idx, 1); persistSamples(); refreshSampleSelect();
+  if (samples.length) { $('sampleSelect').value = Math.min(idx, samples.length - 1); setStatus(`已删除「${s.name}」`, 'info'); }
+  else setStatus('已删除最后一个实例', 'info');
+}
+function exportSamples() {
+  const blob = new Blob([JSON.stringify(samples, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '数织实例.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setStatus('已导出实例文件（数织实例.json）', 'ok');
+}
+function importSamplesFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      const arr = Array.isArray(parsed) ? parsed.filter(s => s && Array.isArray(s.rowClues) && Array.isArray(s.colClues)) : [];
+      if (!arr.length) { setStatus('⚠ 文件中没有可导入的实例', 'err'); return; }
+      samples = samples.concat(arr.map(s => ({ name: s.name || '导入实例', rowClues: s.rowClues, colClues: s.colClues })));
+      persistSamples(); refreshSampleSelect();
+      $('sampleSelect').value = samples.length - 1;
+      setStatus(`已导入 ${arr.length} 个实例`, 'ok');
+    } catch (_) { setStatus('⚠ 文件格式不正确', 'err'); }
+  };
+  reader.readAsText(file);
+}
+
+// ==================== 解析模块 ====================
+function renderExplainBoard() {
+  const box = $('explainBox');
+  box.innerHTML = '';
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.style.gridTemplateColumns = `var(--cell) repeat(${C}, var(--cell))`;
+  const corner = document.createElement('div');
+  corner.className = 'corner'; corner.textContent = '行＼列';
+  sheet.appendChild(corner);
+  for (let j = 0; j < C; j++) { const d = document.createElement('div'); d.className = 'clue'; d.textContent = explainColClues[j].join(' '); sheet.appendChild(d); }
+  for (let i = 0; i < R; i++) {
+    const d = document.createElement('div'); d.className = 'clue'; d.textContent = explainRowClues[i].join(' '); sheet.appendChild(d);
+    for (let j = 0; j < C; j++) { const c = document.createElement('div'); c.className = 'cell'; c.dataset.i = i; c.dataset.j = j; sheet.appendChild(c); }
+  }
+  box.appendChild(sheet);
+}
+function renderExplainAt(k) {
+  const grid = explainHints.map(r => r.slice());
+  for (let s = 0; s <= k; s++) for (const cell of explainSteps[s].cells) grid[cell.i][cell.j] = cell.value;
+  const hl = k >= 0 ? new Set(explainSteps[k].cells.map(c => c.i + ',' + c.j)) : new Set();
+  document.querySelectorAll('#explainBox .cell').forEach(c => {
+    paintCell(c, grid[+c.dataset.i][+c.dataset.j]);
+    c.classList.toggle('hl', hl.has(c.dataset.i + ',' + c.dataset.j));
+  });
+  $('explainCounter').textContent = explainSteps.length ? `第 ${Math.max(0, k + 1)} / ${explainSteps.length} 步` : '';
+  let html = '';
+  if (k >= 0) {
+    const st = explainSteps[k];
+    html = `<div class="ex-head">第 ${k + 1} 步 · ${st.label}（线索 ${st.clues.length ? st.clues.join(' ') : '无'}）</div><div class="ex-body">${escapeHtml(st.text)}</div>`;
+  } else {
+    html = `<div class="ex-body">共 ${explainSteps.length} 步逻辑推断。点「下一步」逐步查看，或「自动播放」。</div>`;
+  }
+  if (k === explainSteps.length - 1 && !explainSolved) html += `<div class="ex-note">⚠ 该题不能仅靠行/列逻辑完全解开，剩余格子需回溯。</div>`;
+  $('explainText').innerHTML = html;
+  updateExplainButtons();
+}
+function updateExplainButtons() {
+  $('explainPrevBtn').disabled = explainSteps.length === 0 || explainIndex < 0;
+  $('explainNextBtn').disabled = explainSteps.length === 0 || explainIndex >= explainSteps.length - 1;
+}
+function stepExplain(delta) { const lo = -1, hi = explainSteps.length - 1; explainIndex = Math.max(lo, Math.min(hi, explainIndex + delta)); renderExplainAt(explainIndex); }
+function stopExplainAuto() { if (explainTimer) { clearInterval(explainTimer); explainTimer = null; } $('explainAutoBtn').textContent = '▶ 自动播放'; }
+function toggleExplainAuto() {
+  if (explainTimer) { stopExplainAuto(); return; }
+  if (explainSteps.length === 0) return;
+  if (explainIndex >= explainSteps.length - 1) explainIndex = -1;
+  explainTimer = setInterval(() => { if (explainIndex >= explainSteps.length - 1) { stopExplainAuto(); return; } stepExplain(1); }, 1200);
+  $('explainAutoBtn').textContent = '⏸ 暂停';
+}
+function startExplain() {
+  stopExplainAuto();
+  const gathered = gatherClues();
+  if (gathered.error) { explainSteps = []; $('explainText').innerHTML = `<div class="ex-body">⚠ ${escapeHtml(gathered.error)}</div>`; return; }
+  explainRowClues = gathered.rowClues;
+  explainColClues = gathered.colClues;
+  explainHints = Array.from({ length: R }, () => new Array(C).fill(0));
+  const res = buildExplanation(explainRowClues, explainColClues, explainHints);
+  if (res.error) { explainSteps = []; renderExplainBoard(); $('explainText').innerHTML = `<div class="ex-body">⚠ ${escapeHtml(res.error)}</div>`; $('explainCounter').textContent = ''; updateExplainButtons(); return; }
+  explainSteps = res.steps;
+  explainSolved = res.solved;
+  explainIndex = -1;
+  renderExplainBoard();
+  renderExplainAt(-1);
+  if (explainSteps.length === 0) { $('explainText').innerHTML = `<div class="ex-body">当前棋盘没有可推出的格子。</div>`; $('explainCounter').textContent = ''; }
+}
+
+// ==================== 设置 ====================
+function applySettings() {
+  const fc = $('fillColorInput').value, xc = $('xColorInput').value;
+  document.documentElement.style.setProperty('--fill-color', fc);
+  document.documentElement.style.setProperty('--x-color', xc);
+  lsSet('picross.fillColor', fc); lsSet('picross.xColor', xc);
+}
+function loadSettings() {
+  const fc = lsGet('picross.fillColor') || '#1f2937';
+  const xc = lsGet('picross.xColor') || '#94a3b8';
+  $('fillColorInput').value = fc; $('xColorInput').value = xc;
+  document.documentElement.style.setProperty('--fill-color', fc);
+  document.documentElement.style.setProperty('--x-color', xc);
+  const ax = lsGet('picross.autoX');
+  autoXEnabled = ax === null ? true : ax === '1';
+  $('autoXToggle').checked = autoXEnabled;
+}
+
+// ==================== 面板切换 ====================
+function switchPanel(name) {
+  document.querySelectorAll('.nav').forEach(b => b.classList.toggle('active', b.dataset.panel === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  const titles = { gen: '出题', solve: '解题', samples: '我的实例', explain: '解析', settings: '设置' };
+  $('panelTitle').textContent = titles[name] || '';
+}
+
+// ==================== 事件绑定 ====================
+document.querySelectorAll('.nav').forEach(b => b.addEventListener('click', () => switchPanel(b.dataset.panel)));
+document.querySelectorAll('.diff').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.diff').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentDifficultyKey = btn.dataset.key;
+  });
+});
+$('genBtn').addEventListener('click', doGenerate);
+$('genAnswerBtn').addEventListener('click', showGeneratedAnswer);
+$('fillColorInput').addEventListener('input', applySettings);
+$('xColorInput').addEventListener('input', applySettings);
+$('autoXToggle').addEventListener('change', () => { autoXEnabled = $('autoXToggle').checked; lsSet('picross.autoX', autoXEnabled ? '1' : '0'); });
+$('buildBtn').addEventListener('click', () => { lastGenerated = null; buildSheet(); lockClues(false); setStatus('已生成输入表，请填写行/列线索', 'info'); });
+$('loadSampleBtn').addEventListener('click', loadSelectedSample);
+$('saveSampleBtn').addEventListener('click', saveCurrentAsSample);
+$('renameSampleBtn').addEventListener('click', renameSample);
+$('deleteSampleBtn').addEventListener('click', deleteSample);
+$('exportSamplesBtn').addEventListener('click', exportSamples);
+$('importSamplesBtn').addEventListener('click', () => $('importFileInput').click());
+$('importFileInput').addEventListener('change', e => { const f = e.target.files[0]; if (f) importSamplesFile(f); e.target.value = ''; });
+$('solveBtn').addEventListener('click', doSolve);
+$('undoBtn').addEventListener('click', undo);
+$('redoBtn').addEventListener('click', redo);
+$('clearHintsBtn').addEventListener('click', clearHints);
+$('prevSolBtn').addEventListener('click', () => showSolution((solIndex - 1 + solutions.length) % solutions.length));
+$('nextSolBtn').addEventListener('click', () => showSolution((solIndex + 1) % solutions.length));
+$('explainBtn').addEventListener('click', startExplain);
+$('explainPrevBtn').addEventListener('click', () => stepExplain(-1));
+$('explainNextBtn').addEventListener('click', () => stepExplain(1));
+$('explainAutoBtn').addEventListener('click', toggleExplainAuto);
+$('explainEndBtn').addEventListener('click', () => { stopExplainAuto(); if (explainSteps.length) stepExplain(explainSteps.length); });
+$('explainResetBtn').addEventListener('click', () => { stopExplainAuto(); explainIndex = -1; if (explainSteps.length) renderExplainAt(-1); });
+$('winAgainBtn').addEventListener('click', () => { closeWinModal(); doGenerate(); });
+$('winCloseBtn').addEventListener('click', closeWinModal);
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
+  else if (e.ctrlKey && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
+});
+
+// ==================== 初始化 ====================
+loadSettings();
+loadSamples();
+refreshSampleSelect();
+switchPanel('gen');
+if (samples.length) {
+  $('rowsInput').value = samples[0].rowClues.length;
+  $('colsInput').value = samples[0].colClues.length;
+  buildSheet();
+  const sheet = document.querySelector('#sheetBox .sheet');
+  sheet.querySelectorAll('.clue[data-kind=row]').forEach((inp, i) => { inp.value = samples[0].rowClues[i].join(' '); });
+  sheet.querySelectorAll('.clue[data-kind=col]').forEach((inp, j) => { inp.value = samples[0].colClues[j].join(' '); });
+} else {
+  buildSheet();
+}
+</script>
+</body>
+</html>
