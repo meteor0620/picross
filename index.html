@@ -122,7 +122,7 @@ input.clue { display: block; }
 .cell:hover { outline: 2px solid #6366f1; outline-offset: -2px; }
 .cell.filled { background: var(--fill-color); background-image: none; }
 .cell.empty { background: #fff; background-image: none; }
-.cell.empty::before { content: '×'; color: var(--x-color); font-size: 21px; font-weight: 700; line-height: 1; }
+.cell.empty::before { content: '×'; color: var(--x-color); font-size: calc(var(--cell) * 0.55); font-weight: 700; line-height: 1; }
 .cell.hl { outline: 3px solid #f59e0b !important; outline-offset: -3px; z-index: 1; }
 .legend { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
 .legend i { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; margin: 0 4px 0 12px; border: 1px solid #94a3b8; font-style: normal; text-align: center; line-height: 12px; font-size: 10px; }
@@ -154,6 +154,39 @@ input.clue { display: block; }
 .modal-stats .stat span { display: block; font-size: 20px; font-weight: 800; color: var(--ink); }
 .modal-stats .stat label { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .modal-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* ===== 手机 / 窄屏自适应 ===== */
+@media (max-width: 720px) {
+  .app { flex-direction: column; height: 100dvh; }
+  .sidebar {
+    width: 100%; flex: none; flex-direction: row; align-items: center; gap: 4px;
+    padding: 8px 10px; border-right: none; border-bottom: 1px solid var(--border);
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .brand { font-size: 14px; padding: 0 8px 0 2px; flex: none; }
+  .sidebar-foot { display: none; }
+  .nav { flex: none; padding: 8px 11px; margin-bottom: 0; font-size: 13px; white-space: nowrap; }
+  .main { min-height: 0; }
+  .topbar { height: 48px; padding: 0 14px; }
+  .topbar h1 { font-size: 15px; }
+  .timer { font-size: 13px; }
+  .content { padding: 12px 10px 24px; }
+  .panel { max-width: none; }
+  .panel-desc { font-size: 12px; }
+  .controls { gap: 8px; }
+  .controls label { font-size: 13px; }
+  .controls input[type=number] { width: 52px; padding: 6px; }
+  button { padding: 8px 12px; font-size: 13px; }
+  .diff-size { width: 46px; font-size: 12px; }
+  .diff { max-width: none; padding: 8px 0; font-size: 12px; }
+  .gen-actions { flex-wrap: wrap; }
+  .result-bar { gap: 8px; }
+  .legend { font-size: 11px; }
+  .settings-group { max-width: none; }
+  .sheetbox { padding: 4px 2px; }
+  .modal { padding: 22px 18px; }
+  .modal-title { font-size: 20px; }
+}
 </style>
 </head>
 <body>
@@ -620,7 +653,9 @@ function buildSheet() {
       sheet.appendChild(cell);
     }
   }
+  sheet.dataset.r = R; sheet.dataset.c = C;
   box.appendChild(sheet);
+  fitSheet(sheet);
   sheet.querySelectorAll('.clue').forEach(inp => {
     inp.addEventListener('input', () => { inp.classList.remove('bad'); });
     inp.addEventListener('keydown', e => {
@@ -633,27 +668,72 @@ function buildSheet() {
     });
   });
   sheet.querySelectorAll('.cell').forEach(c => {
+    let lpTimer = null;
+    const clearLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+    const beginGesture = ds => {
+      if (!ds.started && ds.target !== ds.source) { markCount++; pushUndo(); ds.started = true; }
+    };
+    const paintAt = (i, j) => {
+      if (!dragState) return;
+      if (hintGrid[i][j] === dragState.source) setCellValue(i, j, dragState.target);
+    };
+
     c.addEventListener('pointerdown', e => {
       if (e.button !== 0 && e.button !== 2) return;
       if (dragState) return;
       e.preventDefault();
       const i = +c.dataset.i, j = +c.dataset.j;
       const s0 = hintGrid[i][j];
-      const target = e.button === 0 ? leftPaintValue(s0) : rightPaintValue(s0);
-      dragState = { pointerId: e.pointerId, source: s0, target };
-      if (target !== s0) { markCount++; pushUndo(); setCellValue(i, j, target); }
+      const isTouch = e.pointerType === 'touch';
+      if (isTouch && e.button === 0) {
+        // 触摸：轻点/拖动 = 填黑；按住 450ms = 标 ×
+        dragState = {
+          pointerId: e.pointerId, source: s0, target: leftPaintValue(s0),
+          touch: true, lpFired: false, started: false,
+          si: i, sj: j, startX: e.clientX, startY: e.clientY
+        };
+        beginGesture(dragState);
+        lpTimer = setTimeout(() => {
+          lpTimer = null;
+          if (!dragState || dragState.pointerId !== e.pointerId) return;
+          dragState.lpFired = true;
+          dragState.target = rightPaintValue(dragState.source);
+          beginGesture(dragState);
+          if (dragState.target !== dragState.source) paintAt(i, j);
+        }, 450);
+      } else {
+        dragState = {
+          pointerId: e.pointerId, source: s0,
+          target: e.button === 0 ? leftPaintValue(s0) : rightPaintValue(s0),
+          touch: false, lpFired: false, started: false
+        };
+        beginGesture(dragState);
+        if (dragState.target !== dragState.source) paintAt(i, j);
+      }
       try { c.setPointerCapture(e.pointerId); } catch (_) {}
     });
+
     c.addEventListener('pointermove', e => {
       if (!dragState || e.pointerId !== dragState.pointerId) return;
       if (dragState.target === dragState.source) return;
-      const t = document.elementFromPoint(e.clientX, e.clientY);
-      if (t && t.classList.contains('cell')) {
-        const i = +t.dataset.i, j = +t.dataset.j;
-        if (hintGrid[i][j] === dragState.source) setCellValue(i, j, dragState.target);
+      if (dragState.touch && !dragState.lpFired) {
+        const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+        if (dx * dx + dy * dy < 100) return; // 还没移出判定区，等长按判定
+        clearLp();
+        paintAt(dragState.si, dragState.sj); // 开始填黑拖拽：先涂起始格
       }
+      const t = document.elementFromPoint(e.clientX, e.clientY);
+      if (t && t.classList.contains('cell')) paintAt(+t.dataset.i, +t.dataset.j);
     });
-    const endDrag = e => { if (dragState && e.pointerId === dragState.pointerId) dragState = null; };
+
+    const endDrag = e => {
+      if (!dragState || e.pointerId !== dragState.pointerId) return;
+      clearLp();
+      if (dragState.touch && !dragState.lpFired && dragState.target !== dragState.source) {
+        paintAt(dragState.si, dragState.sj); // 轻点 = 按左键规则切换
+      }
+      dragState = null;
+    };
     c.addEventListener('pointerup', endDrag);
     c.addEventListener('pointercancel', endDrag);
     c.addEventListener('lostpointercapture', endDrag);
@@ -665,6 +745,22 @@ function buildSheet() {
 function lockClues(lock) {
   document.querySelectorAll('#sheetBox .clue').forEach(inp => { inp.readOnly = lock; });
 }
+
+// ==================== 棋盘自适应缩放 ====================
+function fitSheet(sheet) {
+  const R = +sheet.dataset.r || 5, C = +sheet.dataset.c || 5;
+  const box = sheet.parentElement;
+  if (!box) return;
+  const avail = box.clientWidth - 12;
+  if (avail <= 0) return;
+  const maxCell = 40, minCell = 14;
+  let cell = Math.floor(avail / (C + 1));
+  if (cell > maxCell) cell = maxCell;
+  if (cell < minCell) cell = minCell;
+  sheet.style.setProperty('--cell', cell + 'px');
+}
+function fitAllSheets() { document.querySelectorAll('.sheet').forEach(fitSheet); }
+function requestFit() { requestAnimationFrame(fitAllSheets); }
 
 // ==================== 计时 / 答对 ====================
 function formatTime(ms) { const s = Math.floor(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
@@ -1009,7 +1105,9 @@ function renderExplainBoard() {
     const d = document.createElement('div'); d.className = 'clue'; d.textContent = explainRowClues[i].join(' '); sheet.appendChild(d);
     for (let j = 0; j < C; j++) { const c = document.createElement('div'); c.className = 'cell'; c.dataset.i = i; c.dataset.j = j; sheet.appendChild(c); }
   }
+  sheet.dataset.r = R; sheet.dataset.c = C;
   box.appendChild(sheet);
+  fitSheet(sheet);
 }
 function renderExplainAt(k) {
   const grid = explainHints.map(r => r.slice());
@@ -1085,6 +1183,7 @@ function switchPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
   const titles = { gen: '出题', solve: '解题', samples: '我的实例', explain: '解析', settings: '设置' };
   $('panelTitle').textContent = titles[name] || '';
+  requestFit();
 }
 
 // ==================== 事件绑定 ====================
@@ -1129,6 +1228,8 @@ document.addEventListener('keydown', e => {
   if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
   else if (e.ctrlKey && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { e.preventDefault(); redo(); }
 });
+
+window.addEventListener('resize', requestFit);
 
 // ==================== 初始化 ====================
 loadSettings();
