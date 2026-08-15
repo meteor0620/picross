@@ -726,17 +726,16 @@ function buildSheet() {
       if (t && t.classList.contains('cell')) paintAt(+t.dataset.i, +t.dataset.j);
     });
 
-    const endDrag = e => {
+    const finishDrag = () => { clearLp(); dragState = null; };
+    c.addEventListener('pointerup', e => {
       if (!dragState || e.pointerId !== dragState.pointerId) return;
-      clearLp();
       if (dragState.touch && !dragState.lpFired && dragState.target !== dragState.source) {
         paintAt(dragState.si, dragState.sj); // 轻点 = 按左键规则切换
       }
-      dragState = null;
-    };
-    c.addEventListener('pointerup', endDrag);
-    c.addEventListener('pointercancel', endDrag);
-    c.addEventListener('lostpointercapture', endDrag);
+      finishDrag();
+    });
+    c.addEventListener('pointercancel', e => { if (dragState && e.pointerId === dragState.pointerId) finishDrag(); });
+    c.addEventListener('lostpointercapture', e => { if (dragState && e.pointerId === dragState.pointerId) finishDrag(); });
   });
   resetSolutions();
   setStatus('');
