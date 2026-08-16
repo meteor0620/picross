@@ -107,9 +107,7 @@ button.primary:hover { background: #4338ca; }
   text-align: center; font-size: 12px; padding: 2px; color: #334155; outline: none;
   display: flex; align-items: center; justify-content: center;
 }
-input.clue { display: block; text-align: center; }
-textarea.clue { display: block; resize: none; overflow: hidden; white-space: pre-wrap; text-align: center; font-family: inherit; line-height: 1.3; padding-top: 3px; vertical-align: top; }
-.clue[data-kind=row] { text-align: right; white-space: nowrap; justify-content: flex-end; }
+input.clue { display: block; }
 .clue:focus { background: #e0e7ff; }
 .clue.bad { background: #fee2e2; }
 .cell {
@@ -246,7 +244,7 @@ textarea.clue { display: block; resize: none; overflow: hidden; white-space: pre
           <label>列数 <input id="colsInput" type="number" min="1" max="25" value="10"></label>
           <button id="buildBtn">生成输入表</button>
         </div>
-        <p class="hint">📌 在每行、每列前的小格子里输入线索数字（如 <b>1 1 1</b>，空格或逗号分隔；整行/列没有黑格就留空），点「求解」。<br>
+        <p class="hint">📌 在每行/每列前的小格子里<b>逐个</b>输入线索数字（每格一个数，从靠近棋盘的一侧开始填；整行/列没有黑格就全部留空），点「求解」。<br>
         🖱 <b>左键</b>点击/拖动 = 填黑 ↔ 取消；<b>右键</b>点击/拖动 = 标 × ↔ 取消。拖动只改变与按下那一格状态相同的格子。</p>
         <div class="sheetbox" id="sheetBox"></div>
         <div class="legend">图例：<i class="k1"></i>填黑　<i class="k2">×</i>空格　<i class="k3"></i>未知</div>
@@ -619,38 +617,66 @@ function setCellValue(i, j, v) {
 function leftPaintValue(v) { return v === 0 ? 1 : v === 1 ? 0 : -1; }
 function rightPaintValue(v) { return v === 0 ? -1 : v === -1 ? 0 : 1; }
 
-function buildSheet() {
+function buildSheet(clueRow, clueCol) {
   dragState = null;
   markCount = 0;
   solvedFlag = false;
   puzzleAnswer = null;
   lastAutoXY = null;
-  rowW = 1; colH = 1;
   startTimer();
   autoXCache.clear();
   history = []; future = []; updateUndoButtons();
-  const box = $('sheetBox');
-  box.innerHTML = '';
   R = clampInt($('rowsInput').value, 1, 25);
   C = clampInt($('colsInput').value, 1, 25);
   $('rowsInput').value = R; $('colsInput').value = C;
   hintGrid = Array.from({ length: R }, () => new Array(C).fill(0));
+  if (clueRow && clueCol) {
+    renderSheet(clueRow, clueCol);
+  } else {
+    rowW = colH = Math.max(1, Math.ceil(Math.max(R, C) / 2));
+    renderSheet(null, null);
+  }
+  resetSolutions();
+  setStatus('');
+}
+
+function renderSheet(clueRow, clueCol) {
+  let rw = rowW, ch = colH;
+  if (clueRow && clueCol) {
+    rw = 1; ch = 1;
+    clueRow.forEach(c => { if (c.length > rw) rw = c.length; });
+    clueCol.forEach(c => { if (c.length > ch) ch = c.length; });
+    rowW = rw; colH = ch;
+  }
+  rw = Math.max(1, rw); ch = Math.max(1, ch);
+  const box = $('sheetBox');
+  box.innerHTML = '';
   const sheet = document.createElement('div');
   sheet.className = 'sheet';
-  sheet.style.gridTemplateColumns = `var(--cell) repeat(${C}, var(--cell))`;
+  sheet.dataset.r = R; sheet.dataset.c = C;
   sheet.addEventListener('contextmenu', e => e.preventDefault());
   const corner = document.createElement('div');
   corner.className = 'corner'; corner.textContent = '行＼列';
   sheet.appendChild(corner);
-  for (let j = 0; j < C; j++) {
-    const ta = document.createElement('textarea');
-    ta.className = 'clue'; ta.dataset.kind = 'col'; ta.dataset.idx = j; ta.rows = 1;
-    ta.title = '第 ' + (j + 1) + ' 列线索'; sheet.appendChild(ta);
+  // 列线索（上方）：每列 ch 个小格，数字竖排
+  for (let r = 0; r < ch; r++) {
+    for (let j = 0; j < C; j++) {
+      const inp = document.createElement('input');
+      inp.className = 'clue'; inp.type = 'text';
+      inp.dataset.kind = 'col'; inp.dataset.idx = j; inp.dataset.pos = r;
+      inp.title = '第 ' + (j + 1) + ' 列第 ' + (r + 1) + ' 个数';
+      sheet.appendChild(inp);
+    }
   }
+  // 行线索（左侧）+ 游戏格
   for (let i = 0; i < R; i++) {
-    const inp = document.createElement('input');
-    inp.className = 'clue'; inp.type = 'text'; inp.dataset.kind = 'row'; inp.dataset.idx = i;
-    inp.title = '第 ' + (i + 1) + ' 行线索'; sheet.appendChild(inp);
+    for (let k = 0; k < rw; k++) {
+      const inp = document.createElement('input');
+      inp.className = 'clue'; inp.type = 'text';
+      inp.dataset.kind = 'row'; inp.dataset.idx = i; inp.dataset.pos = k;
+      inp.title = '第 ' + (i + 1) + ' 行第 ' + (k + 1) + ' 个数';
+      sheet.appendChild(inp);
+    }
     for (let j = 0; j < C; j++) {
       const cell = document.createElement('div');
       cell.className = 'cell'; cell.dataset.i = i; cell.dataset.j = j;
@@ -658,12 +684,13 @@ function buildSheet() {
       sheet.appendChild(cell);
     }
   }
-  sheet.dataset.r = R; sheet.dataset.c = C;
   box.appendChild(sheet);
-  applyClueSizing(sheet, rowW, colH);
+  applyClueSizing(sheet, rw, ch);
   fitSheet(sheet);
+  if (clueRow && clueCol) fillClues(sheet, clueRow, clueCol);
+  sheet.querySelectorAll('.cell').forEach(c => paintCell(c, hintGrid[+c.dataset.i][+c.dataset.j]));
   sheet.querySelectorAll('.clue').forEach(inp => {
-    inp.addEventListener('input', () => { inp.classList.remove('bad'); recomputeClueArea(); });
+    inp.addEventListener('input', () => inp.classList.remove('bad'));
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -743,8 +770,22 @@ function buildSheet() {
     c.addEventListener('pointercancel', e => { if (dragState && e.pointerId === dragState.pointerId) finishDrag(); });
     c.addEventListener('lostpointercapture', e => { if (dragState && e.pointerId === dragState.pointerId) finishDrag(); });
   });
-  resetSolutions();
-  setStatus('');
+}
+
+function fillClues(sheet, rowClues, colClues) {
+  const rw = +sheet.dataset.rw || 1, ch = +sheet.dataset.ch || 1;
+  sheet.querySelectorAll('.clue[data-kind=row]').forEach(inp => {
+    const clue = rowClues[+inp.dataset.idx] || [];
+    const off = rw - clue.length;
+    const p = +inp.dataset.pos;
+    inp.value = (p >= off && p - off < clue.length) ? clue[p - off] : '';
+  });
+  sheet.querySelectorAll('.clue[data-kind=col]').forEach(inp => {
+    const clue = colClues[+inp.dataset.idx] || [];
+    const off = ch - clue.length;
+    const p = +inp.dataset.pos;
+    inp.value = (p >= off && p - off < clue.length) ? clue[p - off] : '';
+  });
 }
 
 function lockClues(lock) {
@@ -770,28 +811,10 @@ function applyClueSizing(sheet, rw, ch) {
   const C = +sheet.dataset.c || 0;
   const R = +sheet.dataset.r || 0;
   sheet.dataset.rw = rw; sheet.dataset.ch = ch;
-  sheet.style.gridTemplateColumns = `calc(var(--cell) * ${rw}) repeat(${C}, var(--cell))`;
-  sheet.style.gridTemplateRows = `calc(var(--cell) * ${ch}) repeat(${R}, var(--cell))`;
+  sheet.style.gridTemplateColumns = `repeat(${rw}, var(--cell)) repeat(${C}, var(--cell))`;
+  sheet.style.gridTemplateRows = `repeat(${ch}, var(--cell)) repeat(${R}, var(--cell))`;
   const corner = sheet.querySelector('.corner');
-  if (corner) { corner.style.width = `calc(var(--cell) * ${rw})`; corner.style.height = `calc(var(--cell) * ${ch})`; }
-  sheet.querySelectorAll('.clue[data-kind=row]').forEach(el => { el.style.width = `calc(var(--cell) * ${rw})`; el.style.height = 'var(--cell)'; });
-  sheet.querySelectorAll('.clue[data-kind=col]').forEach(el => { el.style.width = 'var(--cell)'; el.style.height = `calc(var(--cell) * ${ch})`; });
-}
-function recomputeClueArea() {
-  const sheet = document.querySelector('#sheetBox .sheet');
-  if (!sheet) return;
-  let rw = 1, ch = 1;
-  sheet.querySelectorAll('.clue[data-kind=row]').forEach(el => { const n = (el.value.match(/\d+/g) || []).length; if (n > rw) rw = n; });
-  sheet.querySelectorAll('.clue[data-kind=col]').forEach(el => { const n = (el.value.match(/\d+/g) || []).length; if (n > ch) ch = n; });
-  if (rw !== rowW || ch !== colH) { rowW = rw; colH = ch; applyClueSizing(sheet, rw, ch); fitSheet(sheet); }
-}
-function sizeSolveSheetFromClues(rowClues, colClues) {
-  let rw = 1, ch = 1;
-  rowClues.forEach(c => { if (c.length > rw) rw = c.length; });
-  colClues.forEach(c => { if (c.length > ch) ch = c.length; });
-  rowW = rw; colH = ch;
-  const sheet = document.querySelector('#sheetBox .sheet');
-  if (sheet) { applyClueSizing(sheet, rw, ch); fitSheet(sheet); }
+  if (corner) { corner.style.gridColumn = `1 / span ${rw}`; corner.style.gridRow = `1 / span ${ch}`; corner.style.width = 'auto'; corner.style.height = 'auto'; }
 }
 function fitAllSheets() { document.querySelectorAll('.sheet').forEach(fitSheet); }
 function requestFit() { requestAnimationFrame(fitAllSheets); }
@@ -884,13 +907,29 @@ function parseClues(text) {
 }
 function gatherClues() {
   const sheet = document.querySelector('#sheetBox .sheet');
-  const rowClues = [], colClues = [];
-  const rowInputs = sheet.querySelectorAll('.clue[data-kind=row]');
-  const colInputs = sheet.querySelectorAll('.clue[data-kind=col]');
+  if (!sheet) return { error: '请先生成输入表' };
+  const rows = Array.from({ length: R }, () => []);
+  const cols = Array.from({ length: C }, () => []);
   let bad = 0;
-  rowInputs.forEach(inp => { const c = parseClues(inp.value); inp.classList.remove('bad'); if (c === null) { inp.classList.add('bad'); bad++; rowClues.push(null); } else rowClues.push(c); });
-  colInputs.forEach(inp => { const c = parseClues(inp.value); inp.classList.remove('bad'); if (c === null) { inp.classList.add('bad'); bad++; colClues.push(null); } else colClues.push(c); });
-  if (bad) return { error: `有 ${bad} 处线索无法识别（请只输入正整数，用空格或逗号分隔）` };
+  sheet.querySelectorAll('.clue[data-kind=row]').forEach(inp => {
+    const v = inp.value.trim();
+    inp.classList.remove('bad');
+    if (v === '') return;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1) { inp.classList.add('bad'); bad++; return; }
+    rows[+inp.dataset.idx].push({ pos: +inp.dataset.pos, n });
+  });
+  sheet.querySelectorAll('.clue[data-kind=col]').forEach(inp => {
+    const v = inp.value.trim();
+    inp.classList.remove('bad');
+    if (v === '') return;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1) { inp.classList.add('bad'); bad++; return; }
+    cols[+inp.dataset.idx].push({ pos: +inp.dataset.pos, n });
+  });
+  if (bad) return { error: `有 ${bad} 处线索无法识别（每个小格只填一个正整数）` };
+  const rowClues = rows.map(arr => arr.sort((a, b) => a.pos - b.pos).map(x => x.n));
+  const colClues = cols.map(arr => arr.sort((a, b) => a.pos - b.pos).map(x => x.n));
   for (let i = 0; i < R; i++) {
     if (rowClues[i].some(n => n > C)) return { error: `第 ${i + 1} 行有数字超过列数 ${C}` };
     const sum = rowClues[i].reduce((a, b) => a + b, 0) + rowClues[i].length - 1;
@@ -995,11 +1034,7 @@ function doGenerate() {
     lastGenerated = res;
     $('rowsInput').value = res.size;
     $('colsInput').value = res.size;
-    buildSheet();
-    const sheet = document.querySelector('#sheetBox .sheet');
-    sheet.querySelectorAll('.clue[data-kind=row]').forEach((inp, i) => { inp.value = res.rowClues[i].join(' '); });
-    sheet.querySelectorAll('.clue[data-kind=col]').forEach((inp, j) => { inp.value = res.colClues[j].join(' '); });
-    sizeSolveSheetFromClues(res.rowClues, res.colClues);
+    buildSheet(res.rowClues, res.colClues);
     puzzleAnswer = res.grid.map(row => row.map(v => v === 1 ? 1 : -1));
     lockClues(true);
     genStatus(`✅ 已生成「${levelLabel(lvl)}」（纯逻辑可解，约 ${res.steps} 步推理）`, 'ok');
@@ -1043,11 +1078,7 @@ function loadSelectedSample() {
   lastGenerated = null;
   $('rowsInput').value = s.rowClues.length;
   $('colsInput').value = s.colClues.length;
-  buildSheet();
-  const sheet = document.querySelector('#sheetBox .sheet');
-  sheet.querySelectorAll('.clue[data-kind=row]').forEach((inp, i) => { inp.value = s.rowClues[i].join(' '); });
-  sheet.querySelectorAll('.clue[data-kind=col]').forEach((inp, j) => { inp.value = s.colClues[j].join(' '); });
-  sizeSolveSheetFromClues(s.rowClues, s.colClues);
+  buildSheet(s.rowClues, s.colClues);
   lockClues(true);
   puzzleAnswer = null;
   const g = gatherClues();
@@ -1127,15 +1158,29 @@ function renderExplainBoard() {
   explainColClues.forEach(c => { if (c.length > ch) ch = c.length; });
   const sheet = document.createElement('div');
   sheet.className = 'sheet';
+  sheet.dataset.r = R; sheet.dataset.c = C;
   const corner = document.createElement('div');
   corner.className = 'corner'; corner.textContent = '行＼列';
   sheet.appendChild(corner);
-  for (let j = 0; j < C; j++) { const d = document.createElement('div'); d.className = 'clue'; d.dataset.kind = 'col'; d.style.whiteSpace = 'pre-wrap'; d.textContent = explainColClues[j].join(' '); sheet.appendChild(d); }
+  for (let r = 0; r < ch; r++) {
+    for (let j = 0; j < C; j++) {
+      const d = document.createElement('div'); d.className = 'clue'; d.dataset.kind = 'col';
+      const clue = explainColClues[j] || [];
+      const off = ch - clue.length;
+      d.textContent = (r >= off && r - off < clue.length) ? clue[r - off] : '';
+      sheet.appendChild(d);
+    }
+  }
   for (let i = 0; i < R; i++) {
-    const d = document.createElement('div'); d.className = 'clue'; d.dataset.kind = 'row'; d.style.whiteSpace = 'nowrap'; d.textContent = explainRowClues[i].join(' '); sheet.appendChild(d);
+    for (let k = 0; k < rw; k++) {
+      const d = document.createElement('div'); d.className = 'clue'; d.dataset.kind = 'row';
+      const clue = explainRowClues[i] || [];
+      const off = rw - clue.length;
+      d.textContent = (k >= off && k - off < clue.length) ? clue[k - off] : '';
+      sheet.appendChild(d);
+    }
     for (let j = 0; j < C; j++) { const c = document.createElement('div'); c.className = 'cell'; c.dataset.i = i; c.dataset.j = j; sheet.appendChild(c); }
   }
-  sheet.dataset.r = R; sheet.dataset.c = C;
   box.appendChild(sheet);
   applyClueSizing(sheet, rw, ch);
   fitSheet(sheet);
@@ -1270,11 +1315,7 @@ switchPanel('gen');
 if (samples.length) {
   $('rowsInput').value = samples[0].rowClues.length;
   $('colsInput').value = samples[0].colClues.length;
-  buildSheet();
-  const sheet = document.querySelector('#sheetBox .sheet');
-  sheet.querySelectorAll('.clue[data-kind=row]').forEach((inp, i) => { inp.value = samples[0].rowClues[i].join(' '); });
-  sheet.querySelectorAll('.clue[data-kind=col]').forEach((inp, j) => { inp.value = samples[0].colClues[j].join(' '); });
-  sizeSolveSheetFromClues(samples[0].rowClues, samples[0].colClues);
+  buildSheet(samples[0].rowClues, samples[0].colClues);
 } else {
   buildSheet();
 }
